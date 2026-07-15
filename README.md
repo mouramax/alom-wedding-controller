@@ -88,3 +88,21 @@ signed-in session survives this redesign.
 - `Shift + Esc` — Emergency STOP ALL AUDIO.
 - `Tab` / `Enter` / `Space` — full keyboard operation; visible focus rings.
 - Honors `prefers-reduced-motion` (no animations, static entrance, blobs hidden).
+
+## Fallback: drive Spotify manually (if remote control ever misbehaves)
+
+The voice announcements, STOP ALL, and the on-screen per-stage instructions all work
+**independently** of Spotify remote control — so if a "Start music" button ever shows
+"No active Spotify device" mid-event, the wedding still runs:
+
+1. Keep tapping the stage buttons for the **voice announcements** — they play from the
+   iPad regardless of Spotify.
+2. Read the on-screen instruction for that stage, then **run Spotify by hand** on the
+   venue device (the one wired to the PA): play / skip / pause / volume.
+3. Use the 14-stage list as your **cue sheet** (exact action + playlist name under each).
+4. STOP ALL still kills any announcement instantly.
+
+For reliable **remote** control (the normal path): use exactly **one** Spotify device at
+the venue, on a **Premium** account, and start one song on it before the first cue so the
+controller can see it (tap the green "Spotify connected" pill — it names the active device).
+As of March 2026, Spotify also requires the **developer account** behind the app to be Premium.

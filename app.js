@@ -79,6 +79,8 @@ const state = {
 const np = {
   isPlaying: false,
   volume: null, // last known device volume_percent, for fades
+  deviceId: null,   // pinned active device — Spotify device discovery is flaky, so we cache it
+  deviceName: null,
 };
 
 let els = {};
@@ -296,7 +298,8 @@ async function spotifyFetch(path, opts = {}) {
 async function pausePlayback() {
   if (!_accessToken && !vault.refreshToken) return; // nothing to pause
   try {
-    const res = await spotifyFetch('/v1/me/player/pause', { method: 'PUT' });
+    const q = np.deviceId ? ('?device_id=' + encodeURIComponent(np.deviceId)) : '';
+    const res = await spotifyFetch('/v1/me/player/pause' + q, { method: 'PUT' });
     // 204 ok; 403 = no active device / not Premium (non-fatal)
     if (res.status === 403) { /* ignore */ }
     np.isPlaying = false;
@@ -309,7 +312,8 @@ async function pausePlayback() {
    some speakers) — every step degrades to the plain hard pause. */
 async function setSpotifyVolume(pct) {
   const v = Math.max(0, Math.min(100, Math.round(pct)));
-  const res = await spotifyFetch('/v1/me/player/volume?volume_percent=' + v, { method: 'PUT' });
+  const q = np.deviceId ? ('&device_id=' + encodeURIComponent(np.deviceId)) : '';
+  const res = await spotifyFetch('/v1/me/player/volume?volume_percent=' + v + q, { method: 'PUT' });
   if (!res.ok && res.status !== 204) throw new Error('VOLUME_' + res.status);
 }
 
@@ -334,30 +338,48 @@ async function fadeOutAndPause() {
 async function getActiveDeviceId() {
   try {
     const player = await spotifyFetch('/v1/me/player').then(r => r.ok ? r.json() : null);
-    if (player && player.device && player.device.is_active) return player.device;
-  } catch (e) { /* fall through */ }
+    if (player && player.device && player.device.id) {
+      np.deviceId = player.device.id; np.deviceName = player.device.name;   // pin the active device
+      return player.device;
+    }
+  } catch (e) { /* fall through — 204 / empty body throws here */ }
   try {
     const devs = await spotifyFetch('/v1/me/player/devices').then(r => r.ok ? r.json() : null);
     const pick = (devs && devs.devices && devs.devices.find(d => !d.is_restricted)) || (devs && devs.devices && devs.devices[0]);
+    if (pick) { np.deviceId = pick.id; np.deviceName = pick.name; }   // pin it
     return pick || null;
   } catch (e) { return null; }
 }
 
 async function playPlaylist(contextUri) {
   let device = await getActiveDeviceId();
-  if (!device) throw new Error('NO_DEVICE');
-  if (!device.is_active) {
-    await spotifyFetch('/v1/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [device.id], play: false }) });
+  // Spotify device discovery is flaky (often returns empty even with a device open),
+  // so fall back to the device we pinned from the Now-Playing poll.
+  if (!device && np.deviceId) device = { id: np.deviceId, name: np.deviceName, is_active: false };
+  if (device) {
+    if (!device.is_active) {
+      try {
+        await spotifyFetch('/v1/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [device.id], play: false }) });
+        await timeout(700);   // let the transfer register before play — fixes 404 "No active device"
+      } catch (e) { /* try to play anyway */ }
+    }
+    np.deviceId = device.id; np.deviceName = device.name;   // pin it
   }
+  const deviceId = device ? device.id : null;
   // Fade in from silence when we know the device volume (else just play).
   const target = (typeof np.volume === 'number' && np.volume > 0) ? np.volume : null;
   let dimmed = false;
-  if (target !== null) { try { await setSpotifyVolume(0); dimmed = true; } catch (e) {} }
-  const q = device.id ? ('?device_id=' + encodeURIComponent(device.id)) : '';
-  const res = await spotifyFetch('/v1/me/player/play' + q, { method: 'PUT', body: JSON.stringify({ context_uri: contextUri }) });
+  if (target !== null && deviceId) { try { await setSpotifyVolume(0); dimmed = true; } catch (e) {} }
+  const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
+  const playOpts = { method: 'PUT', body: JSON.stringify({ context_uri: contextUri }) };
+  let res = await spotifyFetch('/v1/me/player/play' + q, playOpts);
+  if (res.status === 404 && deviceId) {   // Connect lag right after a transfer — retry once
+    await timeout(700);
+    res = await spotifyFetch('/v1/me/player/play' + q, playOpts);
+  }
   if (!res.ok && res.status !== 204) {
     if (dimmed) { try { await setSpotifyVolume(target); } catch (e) {} }
-    throw new Error('PLAY_FAILED_' + res.status);
+    throw new Error(deviceId ? ('PLAY_FAILED_' + res.status) : 'NO_DEVICE');
   }
   np.isPlaying = true;
   if (dimmed) {
@@ -393,7 +415,10 @@ async function pollNowPlaying() {
     if (!res.ok) return;
     const data = await res.json();
     np.isPlaying = !!data.is_playing;
-    if (data.device && typeof data.device.volume_percent === 'number') np.volume = data.device.volume_percent;
+    if (data.device) {
+      if (typeof data.device.volume_percent === 'number') np.volume = data.device.volume_percent;
+      if (data.device.id) { np.deviceId = data.device.id; np.deviceName = data.device.name; }   // pin the active device
+    }
     renderNowPlaying(data);
   } catch (e) { /* transient — keep the last render */ }
 }
@@ -895,8 +920,9 @@ function playRepeatedAnnouncement(entry) {
 /* Resume current Spotify playback (same track/position) without restarting the playlist. */
 async function resumePlayback() {
   try {
-    const device = await getActiveDeviceId();
-    const q = device && device.id ? '?device_id=' + encodeURIComponent(device.id) : '';
+    const found = await getActiveDeviceId();
+    const deviceId = (found && found.id) || np.deviceId;   // prefer fresh, fall back to pinned
+    const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
     const res = await spotifyFetch('/v1/me/player/play' + q, { method: 'PUT' });
     np.isPlaying = (res.ok || res.status === 204);
     setTimeout(pollNowPlaying, 1000);
@@ -941,7 +967,8 @@ function wireGlobal() {
     const s = els.connectBtn.dataset.state;
     if (s === 'connected') {
       getActiveDeviceId().then(d => {
-        showToast(d ? 'Active device: ' + d.name : 'No active Spotify device right now.', d ? 'info' : 'warning');
+        const dev = d || (np.deviceId ? { name: np.deviceName } : null);
+        showToast(dev ? 'Active device: ' + dev.name : 'No active Spotify device — open Spotify on the venue device and press play once.', dev ? 'info' : 'warning');
       }).catch(() => showToast('Spotify connected.', 'info'));
     } else if (s === 'connecting') {
       /* ignore */
