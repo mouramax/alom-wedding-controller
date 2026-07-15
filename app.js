@@ -19,7 +19,7 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '2.6',                                 // bump on each deploy — shown in the footer
+  VERSION: '2.7',                                 // bump on each deploy — shown in the footer
   // We never trust that a fire-and-forget PUT /pause actually took effect. After sending
   // pause we POLL GET /me/player until is_playing === false (server confirmed paused) —
   // adapting to network + Connect-propagation lag instead of guessing a fixed delay. We
@@ -327,25 +327,30 @@ async function readApiError(res) {
           reason = j.error.reason || null;
           message = j.error.message || null;
           if (j.error.status) status = j.error.status;
-        } else { message = txt.slice(0, 200); }
-      } catch (e) { message = txt.slice(0, 200); }
+        }
+        // non-JSON body (e.g. an HTML 5xx page): never surface raw markup as a "message"
+      } catch (e) { /* not JSON — leave message null; humanize shows the status */ }
     }
   } catch (e) { /* no body to read */ }
   return new SpotifyApiError({ status, reason, message });
 }
 
 // Any thrown value (SpotifyApiError / AuthError / network TypeError / plain Error)
-// -> one human-readable line for a toast.
+// -> one toast-ready line. PRINCIPLE: we never rephrase a server string. A single status
+// or reason can legitimately mean different things in different contexts, so paraphrasing
+// risks showing the wrong cause. We surface Spotify's own status + reason + message verbatim
+// and only synthesize text when the server gave us nothing (e.g. we never reached it).
 function humanizeApiError(e) {
   if (e instanceof SpotifyApiError) {
-    if (e.isNetwork) return 'Network error — couldn\'t reach Spotify. Check the connection and retry.';
-    if (e.reason === 'NO_ACTIVE_DEVICE') return 'No active Spotify device. Open Spotify on the venue device, press play once, then retry.';
-    if (e.reason === 'PREMIUM_REQUIRED') return 'Spotify Premium is required to control playback from the app.';
-    if (e.status === 403 && /not registered/i.test(e.spotMessage || '')) return 'Spotify blocked it — the account isn\'t on the app\'s allowlist yet (User Management in the dev dashboard).';
-    const base = e.spotMessage || 'Spotify request failed';
-    return (e.status ? ('Spotify error ' + e.status + ' — ') : '') + base;
+    if (e.isNetwork) return 'Network error — could not reach Spotify (offline, DNS, or timed out).';
+    const parts = [];
+    if (e.status) parts.push('HTTP ' + e.status);
+    if (e.reason) parts.push(e.reason);
+    if (e.spotMessage) parts.push(e.spotMessage);
+    if (parts.length) return 'Spotify: ' + parts.join(' · ');
+    return 'Spotify request failed (no detail returned).';
   }
-  if (e instanceof AuthError) return 'Spotify session ended — tap the status pill to reconnect.';
+  if (e instanceof AuthError) return 'Spotify session ended (' + ((e && e.message) || 'unknown') + ') — tap the status pill to reconnect.';
   return 'Spotify error — ' + ((e && e.message) ? e.message : 'unknown');
 }
 
@@ -366,21 +371,25 @@ async function spotifyFetch(path, opts = {}) {
   return res;
 }
 
+// Returns true only if Spotify ACCEPTED the pause command (HTTP 204/2xx). On any failure
+// it surfaces the real reason via toast and returns false — callers MUST treat false as
+// "the music is still running" and must NOT play a voice cue over it.
 async function pausePlayback() {
-  if (!_accessToken && !vault.refreshToken) return; // not connected — nothing to pause
+  if (!_accessToken && !vault.refreshToken) {
+    showToast('Not connected to Spotify — connect first via the status pill.', 'error', 6000);
+    return false;
+  }
   let res;
   try {
     const q = np.deviceId ? ('?device_id=' + encodeURIComponent(np.deviceId)) : '';
     res = await spotifyFetch('/v1/me/player/pause' + q, { method: 'PUT' });
   } catch (e) {                          // network failure or dead session
     showToast('Pause failed — ' + humanizeApiError(e), 'error', 6000);
-    return;
+    return false;
   }
-  if (res.status === 204 || res.ok) { np.isPlaying = false; return; }   // confirmed paused
-  // Non-2xx: surface Spotify's REAL reason. A "not registered"/"no Premium" pause must
-  // be as visible as a play failure — never silently swallow a 403 again. Non-blocking:
-  // the cue still plays; the toast just tells the operator what happened.
+  if (res.status === 204 || res.ok) { np.isPlaying = false; return true; }   // accepted
   showToast('Pause failed — ' + humanizeApiError(await readApiError(res)), 'error', 6000);
+  return false;
 }
 
 /* ---------- Volume fades (professional in-room sound) ----------
@@ -865,15 +874,30 @@ async function runSequence(entry) {
   setCueState(entry.id, 'playing');
   setHint('Playing: ' + entry.label + (entry.files.length > 1 ? ' (' + entry.files.length + ' parts)' : '') + '…');
 
-  // Fire the pause IMMEDIATELY (fire-and-forget), then VERIFY it actually took effect
-  // by polling until Spotify reports paused — adapting to propagation lag instead of
-  // guessing a fixed delay, plus a cushion for the speaker's ramp-fade.
-  pausePlayback();
+  // Pause Spotify FIRST and REQUIRE it to succeed. The app's job is the speech; pausing the
+  // music is the complementary job it owes the operator. If it can't do that, it must NOT
+  // play the speech over music that is still running — it aborts and hands control back
+  // (see showPlayAnyway). Industrial-control rule: a failed sensor stops the line; it does
+  // not let the conveyor carry on as if nothing happened.
+  const paused = await pausePlayback();
+  if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }   // STOP during the pause call
+  if (!paused) {
+    state.playingLock = null;
+    setCueState(entry.id, 'error');
+    setHint('Couldn\'t pause Spotify automatically. Pause it on the device, then press "Play the speech".');
+    showPlayAnyway(entry);
+    return;
+  }
   await waitForPaused();
+  if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }   // STOP during the wait
+  playSpeech(entry);
+}
 
-  // If STOP (or a superseding action) cleared our lock during the wait, abort.
-  if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }
-
+// Plays the stage's voice files and resolves the cue (mark done + reveal "Start music").
+// Shared by runSequence (after a confirmed pause) and the manual "Play the speech" override.
+function playSpeech(entry) {
+  if (state.playingLock !== entry.id) state.playingLock = entry.id;
+  setCueState(entry.id, 'playing');
   playFiles(entry.files.map(f => 'audio/' + f + '?v=' + CONFIG.VERSION), (err) => {
     state.playingLock = null;
     if (err) {
@@ -888,6 +912,20 @@ async function runSequence(entry) {
       if (entry.playlist) showNextAction(entry);
     }
   }, (current, duration, part, parts) => updateCueProgress(entry.id, current, duration, part, parts));
+}
+
+// Pause failed, so we won't auto-play over music. Give the operator a manual path: pause
+// Spotify on the device by hand, then tap this to play the speech (skipping the pause step).
+function showPlayAnyway(entry) {
+  const card = cueCard(entry.id);
+  if (!card) return;
+  const wrap = card.querySelector('.cue__next');
+  const label = card.querySelector('.cue__next-label');
+  const btn = card.querySelector('.cue__next-btn');
+  label.textContent = 'Couldn\'t auto-pause Spotify. Pause it on the device, then:';
+  btn.textContent = 'Play the speech';
+  btn.onclick = () => { closeNext(entry.id); playSpeech(entry); };
+  wrap.dataset.open = 'true';
 }
 
 /* Peak-end: the whole day ran — one warm, conclusive moment. */
@@ -996,24 +1034,27 @@ function playRepeatedAnnouncement(entry) {
   state.playingLock = lock;
   setCueState(entry.id, 'playing');
   setHint('Repeating the ' + entry.label + ' welcome…');
-  // Fire the pause IMMEDIATELY (fire-and-forget), then VERIFY it took effect by polling
-  // until Spotify reports paused, plus a cushion for the speaker's ramp-fade.
-  pausePlayback();
-  waitForPaused().then(function () {
-    if (state.playingLock !== lock) return;       // STOP during the wait
-    playFiles(
-      entry.files.map(function (f) { return 'audio/' + f + '?v=' + CONFIG.VERSION; }),
-      function () {                               // announcement finished -> resume music
-        if (state.playingLock !== lock) return;
-        resumePlayback().then(function () {
+  // Pause FIRST and require success — same rule as runSequence: never talk over music the
+  // app couldn't pause. If it can't, abandon this repeat (the ticker retries next cycle).
+  pausePlayback().then(function (paused) {
+    if (state.playingLock !== lock) return;       // STOP during the pause call
+    if (!paused) { state.playingLock = null; setCueState(entry.id, 'idle'); return; }
+    waitForPaused().then(function () {
+      if (state.playingLock !== lock) return;     // STOP during the wait
+      playFiles(
+        entry.files.map(function (f) { return 'audio/' + f + '?v=' + CONFIG.VERSION; }),
+        function () {                             // announcement finished -> resume music
           if (state.playingLock !== lock) return;
-          setCueState(entry.id, 'done');
-          state.playingLock = null;
-          setHint('Guest Arrival music resumed — welcome repeats every ' + (entry.repeatAnnouncementMin || 20) + ' min.');
-        });
-      },
-      function (cur, dur) { updateCueProgress(entry.id, cur, dur, 1, entry.files.length); }
-    );
+          resumePlayback().then(function () {
+            if (state.playingLock !== lock) return;
+            setCueState(entry.id, 'done');
+            state.playingLock = null;
+            setHint('Guest Arrival music resumed — welcome repeats every ' + (entry.repeatAnnouncementMin || 20) + ' min.');
+          });
+        },
+        function (cur, dur) { updateCueProgress(entry.id, cur, dur, 1, entry.files.length); }
+      );
+    });
   });
 }
 
