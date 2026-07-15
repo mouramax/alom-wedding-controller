@@ -19,7 +19,7 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '1.6',                                 // bump on each deploy — shown in the footer
+  VERSION: '1.7',                                 // bump on each deploy — shown in the footer
   // Spotify's pause command returns instantly, but the device's audio engine keeps
   // bleeding for ~2-3s. After we send pause, settle this long before starting a voice
   // announcement so the speech never talks over a trailing note. 2s was not enough in
@@ -787,14 +787,16 @@ async function runSequence(entry) {
   setCueState(entry.id, 'playing');
   setHint('Playing: ' + entry.label + (entry.files.length > 1 ? ' (' + entry.files.length + ' parts)' : '') + '…');
 
-  // Briefly await the Spotify fade-out (no music bleed), but never block the voice on network failure.
-  await Promise.race([fadeOutAndPause(), timeout(1200)]);
+  // Fire the pause IMMEDIATELY (fire-and-forget) — no volume fade first. The fade
+  // delayed the pause command, and with the device's pause lag that bled music into
+  // the speech. Sending pause now gives the speaker the whole settle window to go silent.
+  pausePlayback();
 
-  // Spotify's pause lags the command by ~1-2s on the device — settle the extra
-  // second before the voice so it never talks over a trailing note.
+  // Spotify's pause lags the command by ~2-3s on the device — settle before the voice
+  // so it never talks over a trailing note.
   await timeout(CONFIG.PAUSE_SETTLE_MS);
 
-  // If STOP (or a superseding action) cleared our lock during the fade or settle, abort.
+  // If STOP (or a superseding action) cleared our lock during the settle, abort.
   if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }
 
   playFiles(entry.files.map(f => 'audio/' + f), (err) => {
@@ -919,12 +921,10 @@ function playRepeatedAnnouncement(entry) {
   state.playingLock = lock;
   setCueState(entry.id, 'playing');
   setHint('Repeating the ' + entry.label + ' welcome…');
-  Promise.race([fadeOutAndPause(), timeout(1200)]).then(function () {
-    if (state.playingLock !== lock) return;       // STOP / superseded during the fade
-    // Spotify's pause lags ~1-2s on the device — settle before the welcome so it
-    // doesn't talk over a trailing note.
-    return timeout(CONFIG.PAUSE_SETTLE_MS);
-  }).then(function () {
+  // Fire the pause IMMEDIATELY (fire-and-forget) so the speaker starts silencing now;
+  // a volume fade first only delayed the pause and bled music into the welcome.
+  pausePlayback();
+  timeout(CONFIG.PAUSE_SETTLE_MS).then(function () {
     if (state.playingLock !== lock) return;       // STOP during the settle
     playFiles(
       entry.files.map(function (f) { return 'audio/' + f; }),
