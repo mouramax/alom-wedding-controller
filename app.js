@@ -19,7 +19,7 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '1.9',                                 // bump on each deploy — shown in the footer
+  VERSION: '2.0',                                 // bump on each deploy — shown in the footer
   // We never trust that a fire-and-forget PUT /pause actually took effect. After sending
   // pause we POLL GET /me/player until is_playing === false (server confirmed paused) —
   // adapting to network + Connect-propagation lag instead of guessing a fixed delay. We
