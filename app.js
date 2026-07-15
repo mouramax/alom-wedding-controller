@@ -352,34 +352,34 @@ async function getActiveDeviceId() {
 }
 
 async function playPlaylist(contextUri) {
-  let device = await getActiveDeviceId();
-  // Spotify device discovery is flaky (often returns empty even with a device open),
-  // so fall back to the device we pinned from the Now-Playing poll.
-  if (!device && np.deviceId) device = { id: np.deviceId, name: np.deviceName, is_active: false };
-  if (device) {
-    if (!device.is_active) {
-      try {
-        await spotifyFetch('/v1/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [device.id], play: false }) });
-        await timeout(700);   // let the transfer register before play — fixes 404 "No active device"
-      } catch (e) { /* try to play anyway */ }
-    }
-    np.deviceId = device.id; np.deviceName = device.name;   // pin it
+  // Target the device the SAME resilient way pausePlayback does: the pinned id if we
+  // have one, else the implicit active device. Do NOT hard-depend on the flaky
+  // getActiveDeviceId() in the play path — that kept throwing even though pause worked.
+  const deviceId = np.deviceId;
+  const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
+
+  // Re-activate the device (transfer, paused) so the play call reliably lands. Best-effort.
+  if (deviceId) {
+    try {
+      await spotifyFetch('/v1/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [deviceId], play: false }) });
+      await timeout(700);
+    } catch (e) { /* ignore — try to play anyway */ }
   }
-  const deviceId = device ? device.id : null;
-  // Fade in from silence when we know the device volume (else just play).
+
+  // Fade in from silence when we know the device volume.
   const target = (typeof np.volume === 'number' && np.volume > 0) ? np.volume : null;
   let dimmed = false;
   if (target !== null && deviceId) { try { await setSpotifyVolume(0); dimmed = true; } catch (e) {} }
-  const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
+
   const playOpts = { method: 'PUT', body: JSON.stringify({ context_uri: contextUri }) };
   let res = await spotifyFetch('/v1/me/player/play' + q, playOpts);
-  if (res.status === 404 && deviceId) {   // Connect lag right after a transfer — retry once
-    await timeout(700);
-    res = await spotifyFetch('/v1/me/player/play' + q, playOpts);
-  }
+  if (res.status === 404) { await timeout(700); res = await spotifyFetch('/v1/me/player/play' + q, playOpts); }   // Connect lag — retry once
   if (!res.ok && res.status !== 204) {
     if (dimmed) { try { await setSpotifyVolume(target); } catch (e) {} }
-    throw new Error(deviceId ? ('PLAY_FAILED_' + res.status) : 'NO_DEVICE');
+    // Surface Spotify's REAL status + message — never mask it as "no device" again.
+    let detail = 'PLAY_FAILED_' + res.status;
+    try { const j = await res.json(); if (j && j.error && j.error.message) detail += ' — ' + j.error.message; } catch (e) {}
+    throw new Error(detail);
   }
   np.isPlaying = true;
   if (dimmed) {
