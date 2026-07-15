@@ -19,7 +19,7 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '2.0',                                 // bump on each deploy — shown in the footer
+  VERSION: '2.1',                                 // bump on each deploy — shown in the footer
   // We never trust that a fire-and-forget PUT /pause actually took effect. After sending
   // pause we POLL GET /me/player until is_playing === false (server confirmed paused) —
   // adapting to network + Connect-propagation lag instead of guessing a fixed delay. We
@@ -823,7 +823,7 @@ async function runSequence(entry) {
   // If STOP (or a superseding action) cleared our lock during the wait, abort.
   if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }
 
-  playFiles(entry.files.map(f => 'audio/' + f), (err) => {
+  playFiles(entry.files.map(f => 'audio/' + f + '?v=' + CONFIG.VERSION), (err) => {
     state.playingLock = null;
     if (err) {
       const msg = err.message === 'AUDIO_ERROR' ? 'Audio file missing or unreadable for "' + entry.label + '". Check ./audio/.'
@@ -951,7 +951,7 @@ function playRepeatedAnnouncement(entry) {
   waitForPaused().then(function () {
     if (state.playingLock !== lock) return;       // STOP during the wait
     playFiles(
-      entry.files.map(function (f) { return 'audio/' + f; }),
+      entry.files.map(function (f) { return 'audio/' + f + '?v=' + CONFIG.VERSION; }),
       function () {                               // announcement finished -> resume music
         if (state.playingLock !== lock) return;
         resumePlayback().then(function () {
