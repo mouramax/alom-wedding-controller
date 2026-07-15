@@ -376,9 +376,18 @@ async function playPlaylist(contextUri) {
   if (res.status === 404) { await timeout(700); res = await spotifyFetch('/v1/me/player/play' + q, playOpts); }   // Connect lag — retry once
   if (!res.ok && res.status !== 204) {
     if (dimmed) { try { await setSpotifyVolume(target); } catch (e) {} }
-    // Surface Spotify's REAL status + message — never mask it as "no device" again.
+    // Surface Spotify's REAL status + reason/message — never mask it as "no device" again.
     let detail = 'PLAY_FAILED_' + res.status;
-    try { const j = await res.json(); if (j && j.error && j.error.message) detail += ' — ' + j.error.message; } catch (e) {}
+    try {
+      const txt = await res.text();
+      if (txt) {
+        try {
+          const j = JSON.parse(txt);
+          if (j && j.error) detail += (j.error.reason ? ' [' + j.error.reason + ']' : '') + (j.error.message ? ' — ' + j.error.message : '');
+          else detail += ' — ' + txt.slice(0, 120);
+        } catch (e) { detail += ' — ' + txt.slice(0, 120); }
+      }
+    } catch (e) { /* empty body */ }
     throw new Error(detail);
   }
   np.isPlaying = true;
