@@ -19,7 +19,7 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '2.5',                                 // bump on each deploy — shown in the footer
+  VERSION: '2.6',                                 // bump on each deploy — shown in the footer
   // We never trust that a fire-and-forget PUT /pause actually took effect. After sending
   // pause we POLL GET /me/player until is_playing === false (server confirmed paused) —
   // adapting to network + Connect-propagation lag instead of guessing a fixed delay. We
@@ -293,29 +293,94 @@ function logoutSpotify() {
   showToast('Disconnected from Spotify.', 'info');
 }
 
+/* ======================= SPOTIFY API ERRORS =======================
+   ONE error model for every Spotify call, so the operator always sees the REAL
+   reason a command failed — never a silent swallow, never a misleading "no device."
+   A SpotifyApiError carries the HTTP status, Spotify's own `reason` (e.g.
+   NO_ACTIVE_DEVICE, PREMIUM_REQUIRED) and `message`, plus isNetwork when we never
+   reached Spotify at all (offline / DNS / CORS / timeout). humanizeApiError turns
+   ANY thrown value into one toast-ready line. */
+class SpotifyApiError extends Error {
+  constructor({ status = null, reason = null, message = null, isNetwork = false } = {}) {
+    const tag = [];
+    if (status != null) tag.push(status);
+    if (reason) tag.push(reason);
+    const base = message || (isNetwork ? 'Network error — could not reach Spotify' : 'Spotify request failed');
+    super(tag.length ? ('SPOTIFY_' + tag.join('_') + ' — ' + base) : base);
+    this.name = 'SpotifyApiError';
+    this.status = status;
+    this.reason = reason;
+    this.spotMessage = message;
+    this.isNetwork = isNetwork;
+  }
+}
+
+// Parse Spotify's error body { error: { status, message, reason? } } into a SpotifyApiError.
+async function readApiError(res) {
+  let status = res.status, reason = null, message = null;
+  try {
+    const txt = await res.text();
+    if (txt) {
+      try {
+        const j = JSON.parse(txt);
+        if (j && j.error) {
+          reason = j.error.reason || null;
+          message = j.error.message || null;
+          if (j.error.status) status = j.error.status;
+        } else { message = txt.slice(0, 200); }
+      } catch (e) { message = txt.slice(0, 200); }
+    }
+  } catch (e) { /* no body to read */ }
+  return new SpotifyApiError({ status, reason, message });
+}
+
+// Any thrown value (SpotifyApiError / AuthError / network TypeError / plain Error)
+// -> one human-readable line for a toast.
+function humanizeApiError(e) {
+  if (e instanceof SpotifyApiError) {
+    if (e.isNetwork) return 'Network error — couldn\'t reach Spotify. Check the connection and retry.';
+    if (e.reason === 'NO_ACTIVE_DEVICE') return 'No active Spotify device. Open Spotify on the venue device, press play once, then retry.';
+    if (e.reason === 'PREMIUM_REQUIRED') return 'Spotify Premium is required to control playback from the app.';
+    if (e.status === 403 && /not registered/i.test(e.spotMessage || '')) return 'Spotify blocked it — the account isn\'t on the app\'s allowlist yet (User Management in the dev dashboard).';
+    const base = e.spotMessage || 'Spotify request failed';
+    return (e.status ? ('Spotify error ' + e.status + ' — ') : '') + base;
+  }
+  if (e instanceof AuthError) return 'Spotify session ended — tap the status pill to reconnect.';
+  return 'Spotify error — ' + ((e && e.message) ? e.message : 'unknown');
+}
+
 /* ======================= SPOTIFY API ======================= */
 async function spotifyFetch(path, opts = {}) {
   const token = await getValidToken();
   const headers = { Authorization: 'Bearer ' + token, ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(opts.headers || {}) };
   const run = (t) => fetch('https://api.spotify.com' + path, { ...opts, headers: { ...headers, Authorization: 'Bearer ' + t } });
-  let res = await run(token);
+  let res;
+  try { res = await run(token); }
+  catch (netErr) { throw new SpotifyApiError({ isNetwork: true }); }   // offline / DNS / CORS / timeout
   if (res.status === 401) {                 // layer 3: reactive refresh + retry
     _accessToken = null;
-    await refreshAccessToken();
-    res = await run(_accessToken);
+    await refreshAccessToken();             // throws AuthError on failure -> humanizeApiError maps it
+    try { res = await run(_accessToken); }
+    catch (netErr) { throw new SpotifyApiError({ isNetwork: true }); }
   }
   return res;
 }
 
 async function pausePlayback() {
-  if (!_accessToken && !vault.refreshToken) return; // nothing to pause
+  if (!_accessToken && !vault.refreshToken) return; // not connected — nothing to pause
+  let res;
   try {
     const q = np.deviceId ? ('?device_id=' + encodeURIComponent(np.deviceId)) : '';
-    const res = await spotifyFetch('/v1/me/player/pause' + q, { method: 'PUT' });
-    // 204 ok; 403 = no active device / not Premium (non-fatal)
-    if (res.status === 403) { /* ignore */ }
-    np.isPlaying = false;
-  } catch (e) { /* network/auth — non-fatal, voice still plays */ }
+    res = await spotifyFetch('/v1/me/player/pause' + q, { method: 'PUT' });
+  } catch (e) {                          // network failure or dead session
+    showToast('Pause failed — ' + humanizeApiError(e), 'error', 6000);
+    return;
+  }
+  if (res.status === 204 || res.ok) { np.isPlaying = false; return; }   // confirmed paused
+  // Non-2xx: surface Spotify's REAL reason. A "not registered"/"no Premium" pause must
+  // be as visible as a play failure — never silently swallow a 403 again. Non-blocking:
+  // the cue still plays; the toast just tells the operator what happened.
+  showToast('Pause failed — ' + humanizeApiError(await readApiError(res)), 'error', 6000);
 }
 
 /* ---------- Volume fades (professional in-room sound) ----------
@@ -410,19 +475,7 @@ async function playPlaylist(contextUri) {
   if (res.status === 404) { await timeout(700); res = await spotifyFetch('/v1/me/player/play' + q, playOpts); }   // Connect lag — retry once
   if (!res.ok && res.status !== 204) {
     if (dimmed) { try { await setSpotifyVolume(target); } catch (e) {} }
-    // Surface Spotify's REAL status + reason/message — never mask it as "no device" again.
-    let detail = 'PLAY_FAILED_' + res.status;
-    try {
-      const txt = await res.text();
-      if (txt) {
-        try {
-          const j = JSON.parse(txt);
-          if (j && j.error) detail += (j.error.reason ? ' [' + j.error.reason + ']' : '') + (j.error.message ? ' — ' + j.error.message : '');
-          else detail += ' — ' + txt.slice(0, 120);
-        } catch (e) { detail += ' — ' + txt.slice(0, 120); }
-      }
-    } catch (e) { /* empty body */ }
-    throw new Error(detail);
+    throw await readApiError(res);   // centralized: real status + reason + message
   }
   np.isPlaying = true;
   if (dimmed) {
@@ -738,9 +791,7 @@ function startStagePlaylist(entry) {
       return true;
     })
     .catch(err => {
-      showToast(
-        err.message === 'NO_DEVICE' ? 'No active Spotify device. Open Spotify on the venue device, press play once, then retry.'
-        : 'Couldn\'t start playback (' + err.message + ').', 'error');
+      showToast('Couldn\'t start playback — ' + humanizeApiError(err), 'error', 6000);
       return false;
     });
 }
@@ -968,14 +1019,18 @@ function playRepeatedAnnouncement(entry) {
 
 /* Resume current Spotify playback (same track/position) without restarting the playlist. */
 async function resumePlayback() {
+  let found;
   try {
-    const found = await getActiveDeviceId();
-    const deviceId = (found && found.id) || np.deviceId;   // prefer fresh, fall back to pinned
-    const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
-    const res = await spotifyFetch('/v1/me/player/play' + q, { method: 'PUT' });
-    np.isPlaying = (res.ok || res.status === 204);
-    setTimeout(pollNowPlaying, 1000);
-  } catch (e) { /* best effort — playlist may already be going */ }
+    found = await getActiveDeviceId();
+  } catch (e) { showToast('Couldn\'t resume — ' + humanizeApiError(e), 'error', 6000); return; }
+  const deviceId = (found && found.id) || np.deviceId;   // prefer fresh, fall back to pinned
+  const q = deviceId ? ('?device_id=' + encodeURIComponent(deviceId)) : '';
+  let res;
+  try {
+    res = await spotifyFetch('/v1/me/player/play' + q, { method: 'PUT' });
+  } catch (e) { showToast('Couldn\'t resume — ' + humanizeApiError(e), 'error', 6000); return; }
+  if (res.ok || res.status === 204) { np.isPlaying = true; setTimeout(pollNowPlaying, 1000); return; }
+  showToast('Couldn\'t resume — ' + humanizeApiError(await readApiError(res)), 'error', 6000);
 }
 
 async function requestWakeLock() {
@@ -1031,21 +1086,24 @@ function wireGlobal() {
   els.confirmCancel.addEventListener('click', closeConfirm);
   els.confirmDialog.addEventListener('cancel', closeConfirm); // ESC
 
-  // Now Playing play/pause toggle (optimistic; the poll corrects drift)
+  // Now Playing play/pause toggle (checks the real response; the poll corrects drift)
   els.npToggle.addEventListener('click', async () => {
     try {
+      let res;
       if (np.isPlaying) {
-        await spotifyFetch('/v1/me/player/pause', { method: 'PUT' });
-        np.isPlaying = false;
+        res = await spotifyFetch('/v1/me/player/pause', { method: 'PUT' });
+        if (res.ok || res.status === 204) { np.isPlaying = false; }
+        else { showToast('Pause failed — ' + humanizeApiError(await readApiError(res)), 'error', 6000); return; }
       } else {
-        await spotifyFetch('/v1/me/player/play', { method: 'PUT' });
-        np.isPlaying = true;
+        res = await spotifyFetch('/v1/me/player/play', { method: 'PUT' });
+        if (res.ok || res.status === 204) { np.isPlaying = true; }
+        else { showToast('Resume failed — ' + humanizeApiError(await readApiError(res)), 'error', 6000); return; }
       }
       els.npToggle.innerHTML = np.isPlaying ? ICONS.pause : ICONS.play;
       els.npToggle.setAttribute('aria-label', np.isPlaying ? 'Pause Spotify' : 'Resume Spotify');
       setTimeout(pollNowPlaying, 900);
     } catch (e) {
-      showToast('Spotify didn\'t respond — try again.', 'warning');
+      showToast(humanizeApiError(e), 'error', 6000);
     }
   });
 
