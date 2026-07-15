@@ -19,15 +19,18 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '1.8',                                 // bump on each deploy — shown in the footer
-  // Spotify's pause is NOT a hard cut. After we send pause (instantly, fire-and-forget),
-  // the command takes ~2-3s to propagate to the playback device, and Spotify Connect /
-  // the speaker then RAMP-FADES the audio down over another ~1-2s instead of cutting it.
-  // Net: the music stays audible for ~3-4s after the pause command. So we must wait this
-  // long before the voice begins, or the first words always ride over the dying music.
-  // 3s consistently failed live testing (2026-07-15) — bumped to 5s to clear the fade.
-  // Applied to both the main sequence and the guest-arrival repeat.
-  PAUSE_SETTLE_MS: 5000,
+  VERSION: '1.9',                                 // bump on each deploy — shown in the footer
+  // We never trust that a fire-and-forget PUT /pause actually took effect. After sending
+  // pause we POLL GET /me/player until is_playing === false (server confirmed paused) —
+  // adapting to network + Connect-propagation lag instead of guessing a fixed delay. We
+  // require TWO consecutive paused reads, because Spotify's is_playing can briefly serve
+  // stale data (web-api #821). PAUSE_CONFIRM_CAP_MS is the hard ceiling so a network
+  // hiccup never hangs the cue — past it, we proceed best-effort. Then we wait
+  // PAUSE_AFTER_CONFIRM_MS more: the speaker is still mid ramp-fade when the server first
+  // reports paused (Spotify Connect fades ~1-2s on pause, not a hard cut), and our client
+  // can lag the server by a beat. Applied to both the main sequence and the guest-arrival repeat.
+  PAUSE_CONFIRM_CAP_MS: 6000,
+  PAUSE_AFTER_CONFIRM_MS: 1500,
 };
 
 // Redirect URI auto-detects from the current URL (works locally + on GitHub Pages).
@@ -342,6 +345,28 @@ async function fadeOutAndPause() {
   await pausePlayback();
   // Device is now silent; restore its volume so a manual resume isn't muted.
   if (faded) { try { await setSpotifyVolume(from); } catch (e) {} }
+}
+
+/* Confirm Spotify actually reached the paused state before a voice cue. Polls
+   GET /me/player until is_playing === false — TWO consecutive paused reads, to beat
+   the stale-data trap (web-api #821) — capped so a network hiccup never hangs the cue,
+   then one more cushion for the speaker's ramp-fade + client/server lag. Replaces a
+   blind fixed delay: it adapts to real propagation lag instead of guessing it. */
+async function waitForPaused() {
+  const start = Date.now();
+  await timeout(300);                 // let the pause register before the first poll
+  let streak = 0;
+  while (Date.now() - start < CONFIG.PAUSE_CONFIRM_CAP_MS) {
+    let paused = false;
+    try {
+      const res = await spotifyFetch('/v1/me/player');
+      if (res.status === 204) paused = true;                       // no active playback
+      else if (res.ok) { const d = await res.json(); paused = !!(d && d.is_playing === false); }
+    } catch (e) { /* transient — keep polling */ }
+    if (paused) { if (++streak >= 2) break; } else { streak = 0; }
+    await timeout(350);
+  }
+  await timeout(CONFIG.PAUSE_AFTER_CONFIRM_MS);                    // fade tail + confirmation lag
 }
 
 async function getActiveDeviceId() {
@@ -789,16 +814,13 @@ async function runSequence(entry) {
   setCueState(entry.id, 'playing');
   setHint('Playing: ' + entry.label + (entry.files.length > 1 ? ' (' + entry.files.length + ' parts)' : '') + '…');
 
-  // Fire the pause IMMEDIATELY (fire-and-forget) — no volume fade first. The fade
-  // delayed the pause command, and with the device's pause lag that bled music into
-  // the speech. Sending pause now gives the speaker the whole settle window to go silent.
+  // Fire the pause IMMEDIATELY (fire-and-forget), then VERIFY it actually took effect
+  // by polling until Spotify reports paused — adapting to propagation lag instead of
+  // guessing a fixed delay, plus a cushion for the speaker's ramp-fade.
   pausePlayback();
+  await waitForPaused();
 
-  // Spotify's pause lags the command by ~2-3s on the device — settle before the voice
-  // so it never talks over a trailing note.
-  await timeout(CONFIG.PAUSE_SETTLE_MS);
-
-  // If STOP (or a superseding action) cleared our lock during the settle, abort.
+  // If STOP (or a superseding action) cleared our lock during the wait, abort.
   if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }
 
   playFiles(entry.files.map(f => 'audio/' + f), (err) => {
@@ -923,11 +945,11 @@ function playRepeatedAnnouncement(entry) {
   state.playingLock = lock;
   setCueState(entry.id, 'playing');
   setHint('Repeating the ' + entry.label + ' welcome…');
-  // Fire the pause IMMEDIATELY (fire-and-forget) so the speaker starts silencing now;
-  // a volume fade first only delayed the pause and bled music into the welcome.
+  // Fire the pause IMMEDIATELY (fire-and-forget), then VERIFY it took effect by polling
+  // until Spotify reports paused, plus a cushion for the speaker's ramp-fade.
   pausePlayback();
-  timeout(CONFIG.PAUSE_SETTLE_MS).then(function () {
-    if (state.playingLock !== lock) return;       // STOP during the settle
+  waitForPaused().then(function () {
+    if (state.playingLock !== lock) return;       // STOP during the wait
     playFiles(
       entry.files.map(function (f) { return 'audio/' + f; }),
       function () {                               // announcement finished -> resume music
