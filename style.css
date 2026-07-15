@@ -261,7 +261,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* ============================================================
    CONSOLE / TIMELINE
    ============================================================ */
-.console { max-width: 1180px; margin: 0 auto; padding: var(--space-6) var(--space-5) calc(var(--space-8) + 96px); }
+.console { max-width: 1180px; margin: 0 auto; padding: var(--space-6) var(--space-5) var(--space-6); }
 
 .timeline-head { margin-bottom: var(--space-6); }
 .timeline-head__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
@@ -615,6 +615,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .toast[data-type="info"]    .toast__dot { background: var(--color-gold-ink); }
 
 /* ============================================================
+   FOOTER (subtle version + developer credit)
+   ============================================================ */
+.app-footer {
+  max-width: 1180px; margin: 0 auto;
+  padding: var(--space-4) var(--space-5) calc(var(--space-7) + 100px);
+  display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.app-footer__ver {
+  font-size: .7rem; font-weight: 600; letter-spacing: .04em;
+  color: var(--color-text-faint); opacity: .7; font-variant-numeric: tabular-nums;
+}
+.app-footer__sep { font-size: .7rem; color: var(--color-gold-ink); opacity: .4; }
+.app-footer__by {
+  font-family: var(--font-serif); font-style: italic; font-weight: 500;
+  font-size: .82rem; color: var(--color-gold-ink); opacity: .62;
+}
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 640px) {
@@ -624,7 +643,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .status-pill__text { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
   .phase__grid { grid-template-columns: 1fr; }
   .cue__btn { min-height: 88px; }
-  .console { padding: var(--space-5) var(--space-4) calc(var(--space-7) + 96px); }
+  .console { padding: var(--space-5) var(--space-4) var(--space-5); }
 }
 
 /* ============================================================

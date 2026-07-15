@@ -19,6 +19,12 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
+  VERSION: '1.5',                                 // bump on each deploy — shown in the footer
+  // Spotify's pause command returns instantly, but the device's audio engine keeps
+  // bleeding for ~1-2s. After we send pause, settle this long before starting a voice
+  // announcement so the speech never talks over a trailing note (Alom flagged the
+  // overlap, 2026-07-15). Applied to both the main sequence and the guest-arrival repeat.
+  PAUSE_SETTLE_MS: 2000,
 };
 
 // Redirect URI auto-detects from the current URL (works locally + on GitHub Pages).
@@ -783,7 +789,11 @@ async function runSequence(entry) {
   // Briefly await the Spotify fade-out (no music bleed), but never block the voice on network failure.
   await Promise.race([fadeOutAndPause(), timeout(1200)]);
 
-  // If STOP (or a superseding action) cleared our lock during the fade window, abort.
+  // Spotify's pause lags the command by ~1-2s on the device — settle the extra
+  // second before the voice so it never talks over a trailing note.
+  await timeout(CONFIG.PAUSE_SETTLE_MS);
+
+  // If STOP (or a superseding action) cleared our lock during the fade or settle, abort.
   if (state.playingLock !== entry.id) { setCueState(entry.id, 'idle'); return; }
 
   playFiles(entry.files.map(f => 'audio/' + f), (err) => {
@@ -910,6 +920,11 @@ function playRepeatedAnnouncement(entry) {
   setHint('Repeating the ' + entry.label + ' welcome…');
   Promise.race([fadeOutAndPause(), timeout(1200)]).then(function () {
     if (state.playingLock !== lock) return;       // STOP / superseded during the fade
+    // Spotify's pause lags ~1-2s on the device — settle before the welcome so it
+    // doesn't talk over a trailing note.
+    return timeout(CONFIG.PAUSE_SETTLE_MS);
+  }).then(function () {
+    if (state.playingLock !== lock) return;       // STOP during the settle
     playFiles(
       entry.files.map(function (f) { return 'audio/' + f; }),
       function () {                               // announcement finished -> resume music
@@ -966,6 +981,7 @@ function cacheEls() {
     npTrack:      document.getElementById('np-track'),
     npSub:        document.getElementById('np-sub'),
     npToggle:     document.getElementById('np-toggle'),
+    appVersion:   document.getElementById('app-version'),
   };
 }
 
@@ -1030,6 +1046,7 @@ function init() {
   cacheEls();
   wireGlobal();
   renderTimeline();
+  if (els.appVersion) els.appVersion.textContent = CONFIG.VERSION;   // footer version stamp
   setProgress(0);
   setHint('Tap a stage to run it — voice stages fade the music out and announce first; music-only stages switch playlists right away.');
 
