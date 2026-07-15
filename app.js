@@ -29,45 +29,43 @@ function redirectUri() {
   return location.origin + p;
 }
 
-// Playlist URIs — fill these in. Find a URI via Spotify "Share → URI" or copy from the URL.
-// One playlist per stage. Stages 13 & 14 both use "End time" music — paste the
-// same URI into both slots if the client keeps a single End-time playlist.
+// Playlist URIs (spotify:playlist:<id> form). Links provided by Alom on 2026-07-15.
+// Per his plan, several stages intentionally share one playlist — so 8 distinct
+// playlists cover the 14 stages. Stage 7 (Nikkah Preparation) has NO playlist:
+// all music stays off for the Qur'an recitation + English announcement.
 const PLAYLISTS = {
-  guest_arrival:   'spotify:playlist:__FILL_ME__',
-  gate_time:       'spotify:playlist:__FILL_ME__',
-  groom_arrival:   'spotify:playlist:__FILL_ME__',
-  before_bride:    'spotify:playlist:__FILL_ME__',
-  bridal_entry:    'spotify:playlist:__FILL_ME__',
-  nikkah:          'spotify:playlist:__FILL_ME__',
-  qobul:           'spotify:playlist:__FILL_ME__',
-  gunta_removing:  'spotify:playlist:__FILL_ME__',
-  dinner:          'spotify:playlist:__FILL_ME__',
-  cake:            'spotify:playlist:__FILL_ME__',
-  cake_again:      'spotify:playlist:__FILL_ME__',
-  upbeat:          'spotify:playlist:__FILL_ME__',
-  ruksati_end:     'spotify:playlist:__FILL_ME__',
-  final_departure: 'spotify:playlist:__FILL_ME__',
+  guest_arrival:   'spotify:playlist:5n0SlGw1IR1117RQA4LE0I', // 1 Guest Arrival + 2 Gate Time
+  groom_entrance:  'spotify:playlist:2IZq4lKE3DKofTGT2lw10n', // 3 Groom Entrance + 4 Groom & Family Photos
+  before_bride:    'spotify:playlist:2WoHV43fDRz6jKPR1wmb4k', // 5 Before Bride + 6 Bride Grand Entrance
+  nikkah_ceremony: 'spotify:playlist:2osPGORrgcEmCLRosIBHru', // 8 Nikkah Ceremony (low background)
+  qobul:           'spotify:playlist:7gnK04X0TwUqR9tjjhsv8Y', // 9 Qobul & Signing + 10 Gunta Removal
+  cake:            'spotify:playlist:0mPA1Xn53T1FR9EwFjAdTi', // 11 Cake Celebration
+  food:            'spotify:playlist:22C0PPpVT98WWSsqp3CSD3', // 12 Food Service + 13 Family & Couple Photos
+  ruksati:         'spotify:playlist:0m2v2YBtcxw89ZBasCEw6g', // 14 Ruksati & End Time
 };
 
 /* ---------- The 14 stages (data-driven, chronological) ----------
-   Music-first: every stage is a music transition into its own playlist.
-   Stages with voice files play the announcement first, then reveal a
-   "Start music" action; stages with files:[] switch playlists directly. */
+   Matches Alom's latest wedding-day plan (2026-07-15). Music-first: every stage
+   is a transition into its own Spotify playlist. Stages with voice files play the
+   announcement first, then reveal a “Start music” action; music-only stages switch
+   playlists directly. Nikkah Preparation (step 7) has voice but NO playlist — all
+   music stays off for it. Guest Arrival repeats its welcome every 20 min once the
+   music is running (see REPEATING ANNOUNCEMENT; flag added in Pass 2). */
 const STAGES = [
-  { id:'welcome',   step:1,  phase:'Arrival',      label:'Guest Arrival',       sub:'Seating & welcome',                 files:['01_guest_welcome.mp3'],     playlist:'guest_arrival',   music:'Guest arrival music',   manual:false },
-  { id:'gate',      step:2,  phase:'Arrival',      label:'Gate Time',           sub:'Gate moment songs',                 files:[],                           playlist:'gate_time',       music:'Gate time music',       manual:false },
-  { id:'groom',     step:3,  phase:'Processional', label:'Groom Arrival',       sub:'Groom processional',                files:['02_groom_entrance.mp3'],    playlist:'groom_arrival',   music:'Groom arrival music',   manual:true  },
-  { id:'prebride',  step:4,  phase:'Processional', label:'Before Bride Arrives',sub:'Build-up before the bride',         files:[],                           playlist:'before_bride',    music:'Pre-bridal music',      manual:false },
-  { id:'bride',     step:5,  phase:'Processional', label:'Bridal Entry',        sub:'Bride processional',                files:['03_bride_entrance.mp3'],    playlist:'bridal_entry',    music:'Bridal entry music',    manual:true  },
-  { id:'nikkah',    step:6,  phase:'Ceremony',     label:'Nikkah',              sub:'Quran recitation → English Nikkah', files:['04a_quran_ar_rum_30_21_verified.mp3','04b_nikkah_english_announcement.mp3'], playlist:'nikkah', music:'Nikkah music', manual:false },
-  { id:'qobul',     step:7,  phase:'Ceremony',     label:'Qobul Time',          sub:'“I do” & marriage register',        files:['05_qubool_and_signing.mp3'],playlist:'qobul',           music:'Qobul time music',      manual:true  },
-  { id:'gunta',     step:8,  phase:'Ceremony',     label:'Gunta Removing',      sub:'Gunta removing moment',             files:[],                           playlist:'gunta_removing',  music:'Gunta removing music',  manual:false },
-  { id:'food',      step:9,  phase:'Reception',    label:'Dinner & Photos',     sub:'Dinner is served',                  files:['06_food_service.mp3'],      playlist:'dinner',          music:'Dinner & photos music', manual:false },
-  { id:'cake',      step:10, phase:'Reception',    label:'Cake Celebration',    sub:'Cake-cutting moment',               files:['07_cake_cutting.mp3'],      playlist:'cake',            music:'Cake celebration music',manual:false },
-  { id:'cake2',     step:11, phase:'Reception',    label:'Cake Songs Again',    sub:'Cake songs, one more round',        files:[],                           playlist:'cake_again',      music:'Cake songs (again)',    manual:false },
-  { id:'upbeat',    step:12, phase:'Reception',    label:'Upbeat Songs',        sub:'Dance-floor energy',                files:[],                           playlist:'upbeat',          music:'Upbeat music',          manual:false },
-  { id:'ruksati',   step:13, phase:'Departure',    label:'Ruksati Preparation', sub:'Send-off preparation',              files:['08_ruksati_preparation.mp3'],playlist:'ruksati_end',    music:'End time music',        manual:true  },
-  { id:'departure', step:14, phase:'Departure',    label:'Final Departure',     sub:'Final send-off',                    files:[],                           playlist:'final_departure', music:'End time music',        manual:false },
+  { id:'guest_arrival', step:1,  phase:'Arrival',      label:'Guest Arrival',          sub:'Seating & welcome · repeats every 20 min',     files:['01_guest_welcome.mp3'],                                       playlist:'guest_arrival',   music:'Guest arrival music',     manual:false, repeatAnnouncementMin:20 },
+  { id:'gate_time',     step:2,  phase:'Arrival',      label:'Gate Time',              sub:'Groom reaches the gate',                       files:[],                                                             playlist:'guest_arrival',   music:'Gate time music',         manual:false },
+  { id:'groom',         step:3,  phase:'Processional', label:'Groom Entrance',         sub:'Groom processional',                           files:['02_groom_entrance.mp3'],                                      playlist:'groom_entrance',  music:'Groom entrance music',    manual:true  },
+  { id:'groom_photos',  step:4,  phase:'Processional', label:'Groom & Family Photos',  sub:'Direct-family photos',                         files:[],                                                             playlist:'groom_entrance',  music:'Groom entrance music',    manual:false },
+  { id:'before_bride',  step:5,  phase:'Processional', label:'Before Bride Arrival',   sub:'Build-up before the bride',                    files:[],                                                             playlist:'before_bride',    music:'Pre-bride music',         manual:false },
+  { id:'bride',         step:6,  phase:'Processional', label:'Bride Grand Entrance',   sub:'Bride processional',                           files:['03_bride_entrance.mp3'],                                      playlist:'before_bride',    music:'Bridal entrance music',   manual:true  },
+  { id:'nikkah_prep',   step:7,  phase:'Ceremony',     label:'Nikkah Preparation',     sub:'Qur\'an recitation → English Nikkah',          files:['04a_quran_ar_rum_30_21_verified.mp3','04b_nikkah_english_announcement.mp3'], playlist:null, music:'',                      manual:false },
+  { id:'nikkah',        step:8,  phase:'Ceremony',     label:'Nikkah Ceremony',        sub:'Very low background music only',               files:[],                                                             playlist:'nikkah_ceremony', music:'Nikkah background',       manual:false },
+  { id:'qobul',         step:9,  phase:'Ceremony',     label:'Qobul & Signing',        sub:'After the final Qobul — signing',              files:['05_qubool_and_signing.mp3'],                                  playlist:'qobul',           music:'Qobul & signing music',   manual:true  },
+  { id:'gunta',         step:10, phase:'Ceremony',     label:'Gunta Removal',          sub:'Veil removal moment',                          files:[],                                                             playlist:'qobul',           music:'Gunta removal music',     manual:false },
+  { id:'cake',          step:11, phase:'Reception',    label:'Cake Celebration',       sub:'Cake-cutting moment',                          files:['07_cake_cutting.mp3'],                                        playlist:'cake',            music:'Cake celebration music',  manual:true  },
+  { id:'food',          step:12, phase:'Reception',    label:'Food Service',           sub:'Dinner is served',                             files:['06_food_service.mp3'],                                        playlist:'food',            music:'Dinner & photos music',   manual:false },
+  { id:'photos',        step:13, phase:'Reception',    label:'Family & Couple Photos', sub:'Continue dinner music softly',                 files:[],                                                             playlist:'food',            music:'Dinner & photos music',   manual:false },
+  { id:'ruksati',       step:14, phase:'Departure',    label:'Ruksati & End Time',     sub:'Send-off · stop at the doors',                 files:['08_ruksati_preparation.mp3'],                                 playlist:'ruksati',         music:'Ruksati music',           manual:true  },
 ];
 const PHASE_ORDER = ['Arrival','Processional','Ceremony','Reception','Departure'];
 
@@ -568,6 +566,13 @@ function buildCue(a, i) {
   art.querySelector('.cue__label').textContent = a.label;
   art.querySelector('.cue__sub').textContent = a.sub + (a.files.length > 1 ? '  ·  ' + a.files.length + ' parts' : '');
   art.querySelector('.cue__btn').addEventListener('click', () => triggerStage(a));
+  if (a.repeatAnnouncementMin) {
+    const rep = document.createElement('span');
+    rep.className = 'cue__repeat';
+    rep.style.cssText = 'display:block;margin-top:.25rem;font-size:.72rem;font-weight:600;letter-spacing:.02em;color:#b08d57';
+    rep.textContent = 'Repeats every ' + a.repeatAnnouncementMin + ' min';
+    art.querySelector('.cue__body').append(rep);
+  }
   return art;
 }
 
@@ -661,6 +666,7 @@ function startStagePlaylist(entry) {
       // Music-only stages complete when their playlist starts;
       // voice stages were already completed when the announcement ended.
       if (entry.files.length === 0) markStageDone(entry);
+      if (entry.repeatAnnouncementMin) armRepeat(entry);   // Guest Arrival: arm the recurring welcome
       return true;
     })
     .catch(err => {
@@ -712,6 +718,7 @@ function showToast(message, type = 'info', ttl = 4200) {
 
 /* ======================= PLAY SEQUENCE ======================= */
 function triggerStage(entry) {
+  if (_repeat && _repeat.entry.id !== entry.id) disarmRepeat();   // leaving the repeat stage
   if (state.playingLock) {
     showToast('An announcement is playing. Wait for it to finish, or hit STOP ALL.', 'warning');
     return;
@@ -755,7 +762,8 @@ async function runSequence(entry) {
       showToast(msg, 'error');
     } else {
       markStageDone(entry);
-      showNextAction(entry);
+      // Nikkah Preparation has voice but no playlist — no "Start music" to reveal.
+      if (entry.playlist) showNextAction(entry);
     }
   }, (current, duration, part, parts) => updateCueProgress(entry.id, current, duration, part, parts));
 }
@@ -786,6 +794,7 @@ function closeConfirm() {
 
 /* ======================= EMERGENCY STOP ======================= */
 function stopEverything() {
+  disarmRepeat();          // stop the recurring Guest Arrival welcome too
   stopAudio();
   pausePlayback(); // best-effort, fire-and-forget — hard pause, never a fade
   np.isPlaying = false;
@@ -794,6 +803,110 @@ function stopEverything() {
   els.timeline.querySelectorAll('.cue[data-state="playing"]').forEach(c => setCueState(c.dataset.id, 'idle'));
   setHint('Stopped. All cues are ready — tap one to (re)play.');
   showToast('All audio stopped.', 'info');
+}
+
+/* ======================= REPEATING ANNOUNCEMENT (Guest Arrival) =======================
+   Guest Arrival is a long pre-ceremony window (~40 min): guests trickle in, so a
+   single welcome at the start only reaches the early arrivals. While its playlist
+   plays, we re-run the welcome every N minutes: fade Spotify out -> play the MP3
+   -> RESUME the same playback where it was. It stops when the operator taps
+   another cue or hits STOP ALL.
+
+   iPad reliability: a screen wake lock keeps the device awake (a locked screen
+   throttles/freezes timers); a 1-second ticker drives both the on-card countdown
+   and the firing decision, anchored to absolute time so the cadence self-corrects
+   after any throttling. The visible countdown is also a manual cue to the operator. */
+let _repeat = null;      // { entry, intervalMs, nextAt, wakeLock }
+let _repeatTicker = null;
+
+function repeatCardEl(entry) {
+  const card = cueCard(entry.id);
+  return card ? card.querySelector('.cue__repeat') : null;
+}
+
+function armRepeat(entry) {
+  if (!entry.repeatAnnouncementMin) return;
+  disarmRepeat();
+  const intervalMs = entry.repeatAnnouncementMin * 60 * 1000;
+  _repeat = { entry: entry, intervalMs: intervalMs, nextAt: Date.now() + intervalMs, wakeLock: null };
+  if (_repeatTicker) clearInterval(_repeatTicker);
+  _repeatTicker = setInterval(repeatTick, 1000);
+  updateRepeatCountdown();
+  requestWakeLock();
+  showToast('Welcome will repeat every ' + entry.repeatAnnouncementMin + ' min while Guest Arrival is live.', 'info');
+}
+
+function disarmRepeat() {
+  if (_repeatTicker) { clearInterval(_repeatTicker); _repeatTicker = null; }
+  if (!_repeat) return;
+  if (_repeat.wakeLock) { try { _repeat.wakeLock.release(); } catch (e) {} }
+  const el = repeatCardEl(_repeat.entry);
+  if (el) el.textContent = 'Repeats every ' + _repeat.entry.repeatAnnouncementMin + ' min';
+  _repeat = null;
+}
+
+function repeatTick() {
+  const r = _repeat;
+  if (!r) return;
+  updateRepeatCountdown();
+  if (Date.now() >= r.nextAt && !state.playingLock) {
+    r.nextAt = Date.now() + r.intervalMs;   // schedule next from now (absolute-time, self-correcting)
+    playRepeatedAnnouncement(r.entry);
+  }
+}
+
+function updateRepeatCountdown() {
+  const r = _repeat;
+  if (!r) return;
+  const el = repeatCardEl(r.entry);
+  if (!el) return;
+  const secs = Math.max(0, Math.round((r.nextAt - Date.now()) / 1000));
+  el.textContent = 'Next welcome in ' + fmtTime(secs);
+}
+
+/* Fade Spotify out -> play the welcome -> resume the SAME playback where it was.
+   Callback-based (like runSequence) so an abort via STOP never leaves a dangling
+   promise: if STOP clears the lock, these callbacks short-circuit and STOP owns
+   the cleanup. */
+function playRepeatedAnnouncement(entry) {
+  if (state.playingLock) return;                  // never talk over a live cue
+  const lock = entry.id + ':repeat';
+  state.playingLock = lock;
+  setCueState(entry.id, 'playing');
+  setHint('Repeating the ' + entry.label + ' welcome…');
+  Promise.race([fadeOutAndPause(), timeout(1200)]).then(function () {
+    if (state.playingLock !== lock) return;       // STOP / superseded during the fade
+    playFiles(
+      entry.files.map(function (f) { return 'audio/' + f; }),
+      function () {                               // announcement finished -> resume music
+        if (state.playingLock !== lock) return;
+        resumePlayback().then(function () {
+          if (state.playingLock !== lock) return;
+          setCueState(entry.id, 'done');
+          state.playingLock = null;
+          setHint('Guest Arrival music resumed — welcome repeats every ' + (entry.repeatAnnouncementMin || 20) + ' min.');
+        });
+      },
+      function (cur, dur) { updateCueProgress(entry.id, cur, dur, 1, entry.files.length); }
+    );
+  });
+}
+
+/* Resume current Spotify playback (same track/position) without restarting the playlist. */
+async function resumePlayback() {
+  try {
+    const device = await getActiveDeviceId();
+    const q = device && device.id ? '?device_id=' + encodeURIComponent(device.id) : '';
+    const res = await spotifyFetch('/v1/me/player/play' + q, { method: 'PUT' });
+    np.isPlaying = (res.ok || res.status === 204);
+    setTimeout(pollNowPlaying, 1000);
+  } catch (e) { /* best effort — playlist may already be going */ }
+}
+
+async function requestWakeLock() {
+  if (!_repeat || !('wakeLock' in navigator)) return;
+  try { if (!_repeat.wakeLock) _repeat.wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (e) { /* non-fatal — countdown + ticker still run while the tab is active */ }
 }
 
 /* ======================= WIRING / INIT ======================= */
@@ -863,6 +976,7 @@ function wireGlobal() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (_accessToken && isExpiringSoon()) refreshAccessToken().catch(() => {});
+    if (_repeat) requestWakeLock();   // screen wake lock is dropped on backgrounding; re-grab on return
     pollNowPlaying();
   });
 

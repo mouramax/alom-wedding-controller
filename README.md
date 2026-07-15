@@ -18,12 +18,12 @@ Files: `index.html`, `style.css`, `app.js`, and an `audio/` folder for the 9 MP3
    - prod:   `https://<you>.github.io/<repo>/alom-wedding-controller/`
    Copy the **Client ID** into `CONFIG.CLIENT_ID` at the top of `app.js`.
    (Dev Mode: add the operator's Spotify account under User Management.)
-2. **Playlists** — paste your 14 Spotify playlist URIs into the `PLAYLISTS` map
-   in `app.js`, one per stage (`guest_arrival`, `gate_time`, `groom_arrival`,
-   `before_bride`, `bridal_entry`, `nikkah`, `qobul`, `gunta_removing`, `dinner`,
-   `cake`, `cake_again`, `upbeat`, `ruksati_end`, `final_departure`). Stages 13
-   and 14 both use "End time" music — paste the same URI into both slots if a
-   single End-time playlist is kept.
+2. **Playlists** — already filled (links from Alom, 2026-07-15). Eight distinct
+   Spotify playlists cover the 14 stages, since several stages intentionally share
+   one (see the `PLAYLISTS` map in `app.js`). Stage 7 (Nikkah Preparation) has no
+   playlist — all music stays off for the Qur'an recitation + English announcement.
+   Guest Arrival (stage 1) repeats its welcome announcement every 20 minutes while
+   its playlist is live.
 3. **Audio** — drop the 9 MP3s into `audio/` (see `audio/README.md`).
 
 No client secret is ever needed — the app uses **Authorization Code + PKCE**
