@@ -19,12 +19,13 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '1.5',                                 // bump on each deploy — shown in the footer
+  VERSION: '1.6',                                 // bump on each deploy — shown in the footer
   // Spotify's pause command returns instantly, but the device's audio engine keeps
-  // bleeding for ~1-2s. After we send pause, settle this long before starting a voice
-  // announcement so the speech never talks over a trailing note (Alom flagged the
-  // overlap, 2026-07-15). Applied to both the main sequence and the guest-arrival repeat.
-  PAUSE_SETTLE_MS: 2000,
+  // bleeding for ~2-3s. After we send pause, settle this long before starting a voice
+  // announcement so the speech never talks over a trailing note. 2s was not enough in
+  // live testing (2026-07-15) — bumped to 3s. Applied to both the main sequence and
+  // the guest-arrival repeat.
+  PAUSE_SETTLE_MS: 3000,
 };
 
 // Redirect URI auto-detects from the current URL (works locally + on GitHub Pages).
