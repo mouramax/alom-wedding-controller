@@ -19,13 +19,15 @@
 const CONFIG = {
   CLIENT_ID: '67089320701242d7aa0ea8b48250390b', // Provided by Alom
   SCOPES: 'user-modify-playback-state user-read-playback-state',
-  VERSION: '1.7',                                 // bump on each deploy — shown in the footer
-  // Spotify's pause command returns instantly, but the device's audio engine keeps
-  // bleeding for ~2-3s. After we send pause, settle this long before starting a voice
-  // announcement so the speech never talks over a trailing note. 2s was not enough in
-  // live testing (2026-07-15) — bumped to 3s. Applied to both the main sequence and
-  // the guest-arrival repeat.
-  PAUSE_SETTLE_MS: 3000,
+  VERSION: '1.8',                                 // bump on each deploy — shown in the footer
+  // Spotify's pause is NOT a hard cut. After we send pause (instantly, fire-and-forget),
+  // the command takes ~2-3s to propagate to the playback device, and Spotify Connect /
+  // the speaker then RAMP-FADES the audio down over another ~1-2s instead of cutting it.
+  // Net: the music stays audible for ~3-4s after the pause command. So we must wait this
+  // long before the voice begins, or the first words always ride over the dying music.
+  // 3s consistently failed live testing (2026-07-15) — bumped to 5s to clear the fade.
+  // Applied to both the main sequence and the guest-arrival repeat.
+  PAUSE_SETTLE_MS: 5000,
 };
 
 // Redirect URI auto-detects from the current URL (works locally + on GitHub Pages).
