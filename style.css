@@ -160,58 +160,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .app-bar__controls { display: flex; align-items: center; gap: var(--space-3); }
 
-/* ---------- Status pill (4 states) ----------
-   Same look-and-feel as STOP ALL — a solid filled pill;
-   only the color changes with connection state. */
-.status-pill {
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  min-height: 48px;
-  padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-full);
-  border: 1px solid transparent;
-  color: oklch(0.99 0.005 90);
-  font-size: var(--font-size-sm); font-weight: 700; letter-spacing: .04em;
-  transition: border-color var(--motion-fast) var(--motion-ease-standard),
-              background-color var(--motion-fast) var(--motion-ease-standard),
-              box-shadow var(--motion-fast) var(--motion-ease-standard),
-              transform var(--motion-fast) var(--motion-ease-standard);
-}
-.status-pill:hover { transform: translateY(-1px); }
-.status-pill:active { transform: scale(.97); }
-.status-pill__dot {
-  width: .6rem; height: .6rem; border-radius: 50%; flex: none;
-  background: oklch(0.99 0.005 90);
-  box-shadow: 0 0 8px oklch(1 0 0 / .7);
-}
-.status-pill[data-state="disconnected"] {
-  background: linear-gradient(180deg, oklch(0.56 0.115 70), oklch(0.47 0.115 70));
-  border-color: oklch(0.4 0.1 70);
-  box-shadow: 0 6px 20px oklch(0.52 0.12 70 / .35);
-}
-.status-pill[data-state="connecting"] {
-  background: linear-gradient(180deg, oklch(0.55 0.03 70), oklch(0.46 0.03 70));
-  border-color: oklch(0.4 0.03 70);
-  box-shadow: 0 6px 20px oklch(0.5 0.03 70 / .3);
-}
-.status-pill[data-state="connecting"] .status-pill__dot {
-  animation: pulse-dot 1.2s var(--motion-ease-standard) infinite;
-}
-.status-pill[data-state="connected"] {
-  background: linear-gradient(180deg, oklch(0.54 0.13 150), oklch(0.45 0.13 150));
-  border-color: oklch(0.38 0.12 150);
-  box-shadow: 0 6px 20px oklch(0.5 0.13 150 / .35);
-}
-.status-pill[data-state="error"] {
-  background: linear-gradient(180deg, var(--color-danger), color-mix(in oklch, var(--color-danger), black 14%));
-  border-color: color-mix(in oklch, var(--color-danger), black 25%);
-  box-shadow: 0 6px 20px color-mix(in oklch, var(--color-danger), transparent 60%);
-}
-.status-pill__text { white-space: nowrap; }
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: .4; transform: scale(.8); }
-}
-
 /* ============================================================
    BUTTONS
    ============================================================ */
@@ -407,34 +355,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .cue[data-state="idle"]:hover .cue__step { background: color-mix(in oklch, var(--color-gold), transparent 60%); }
 }
 
-/* badge row — Voice/Music type + optional Confirm pill, inline in the card
-   body so every card keeps identical padding and vertical alignment */
+/* badge row — optional Confirm pill, inline in the card body so every card
+   keeps identical padding and vertical alignment */
 .cue__meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
   margin: 2px 0 1px;
 }
-.cue__type, .cue__manual {
+.cue__manual {
   display: inline-flex; align-items: center; gap: .3rem;
   padding: .14rem .5rem; border-radius: var(--radius-full);
   font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
   line-height: 1.4; white-space: nowrap;
-}
-.cue__type .icon, .cue__manual .icon { width: .95em; height: .95em; }
-.cue__type[data-type="voice"] {
-  color: var(--color-gold-ink);
-  background: var(--color-gold-soft);
-  border: 1px solid color-mix(in oklch, var(--color-gold), transparent 55%);
-}
-.cue__type[data-type="music"] {
-  color: var(--color-text-muted);
-  background: color-mix(in oklch, var(--color-surface-3), transparent 25%);
-  border: 1px solid var(--color-border);
-}
-.cue__manual {
   color: var(--color-warning);
   background: color-mix(in oklch, var(--color-warning), white 82%);
   border: 1px solid color-mix(in oklch, var(--color-warning), transparent 55%);
 }
+.cue__manual .icon { width: .95em; height: .95em; }
 
 /* ---- states ---- */
 .cue[data-state="playing"] {
@@ -506,59 +442,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cue__next-label { font-size: var(--font-size-sm); color: var(--color-text-muted); flex: 1; }
 .cue__next-label strong { color: var(--color-text); font-weight: 600; }
 .cue__next-btn { white-space: nowrap; }
-
-/* ============================================================
-   NOW PLAYING (Spotify)
-   ============================================================ */
-.now-playing {
-  position: fixed; left: 50%; bottom: var(--space-4); z-index: 40;
-  transform: translateX(-50%);
-  display: flex; align-items: center; gap: var(--space-3);
-  width: min(92vw, 540px);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-full);
-  transition: transform var(--motion-slow) var(--motion-ease-emphasized),
-              opacity var(--motion-slow) var(--motion-ease-standard);
-}
-.now-playing[data-visible="false"] {
-  transform: translateX(-50%) translateY(140%);
-  opacity: 0; pointer-events: none;
-  visibility: hidden;
-}
-.now-playing__art {
-  width: 48px; height: 48px; border-radius: 50%; flex: none;
-  object-fit: cover;
-  border: 1px solid color-mix(in oklch, var(--color-gold), transparent 40%);
-  box-shadow: 0 2px 10px oklch(0.4 0.045 70 / .18);
-}
-.now-playing__disc {
-  display: grid; place-items: center;
-  width: 48px; height: 48px; border-radius: 50%; flex: none;
-  color: var(--color-gold-ink);
-  background: var(--color-gold-soft);
-  border: 1px solid color-mix(in oklch, var(--color-gold), transparent 55%);
-}
-.now-playing__art:not([hidden]) + .now-playing__disc { display: none; }
-.now-playing__meta { min-width: 0; flex: 1; }
-.now-playing__track {
-  font-size: var(--font-size-sm); font-weight: 700; line-height: 1.3;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.now-playing__sub {
-  font-size: var(--font-size-xs); color: var(--color-text-muted); line-height: 1.35;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.now-playing__btn {
-  display: grid; place-items: center; flex: none;
-  width: 48px; height: 48px; border-radius: 50%;
-  border: 1px solid color-mix(in oklch, var(--color-gold-ink), transparent 55%);
-  background: linear-gradient(180deg, var(--color-gold-bright), var(--color-gold));
-  color: oklch(0.24 0.03 60);
-  box-shadow: 0 4px 14px var(--color-gold-glow);
-  transition: transform var(--motion-fast) var(--motion-ease-standard);
-}
-.now-playing__btn:active { transform: scale(.94); }
-@media (hover: hover) { .now-playing__btn:hover { transform: translateY(-1px); } }
 
 /* ============================================================
    MODAL (confirmation)
@@ -639,8 +522,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (max-width: 640px) {
   .app-bar { flex-wrap: wrap; }
   .app-bar__controls { width: 100%; justify-content: space-between; }
-  .status-pill, .btn--danger { padding-left: var(--space-4); padding-right: var(--space-4); }
-  .status-pill__text { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+  .btn--danger { padding-left: var(--space-4); padding-right: var(--space-4); }
   .phase__grid { grid-template-columns: 1fr; }
   .cue__btn { min-height: 88px; }
   .console { padding: var(--space-5) var(--space-4) var(--space-5); }
